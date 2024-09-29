@@ -201,6 +201,21 @@ function isLand(u, v, { earthImgData, width, height }) {
   return false; // 否则认为是水域
 }
 
+function createPosition(lnglat) {
+  const spherical = new THREE.Spherical();
+  spherical.radius = 100;
+  const lng = lnglat[0];
+  const lat = lnglat[1];
+  const theta = (lng + 90) * (Math.PI / 180);
+  const phi = (90 - lat) * (Math.PI / 180);
+  spherical.phi = phi;
+  spherical.theta = theta;
+  const position = new THREE.Vector3();
+  position.setFromSpherical(spherical);
+
+  return position;
+}
+
 function resizeRendererToDisplaySize(renderer) {
   const canvas = renderer.domElement;
   const width = canvas.clientWidth;
