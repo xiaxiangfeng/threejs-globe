@@ -6,6 +6,8 @@ let renderer;
 let camera;
 let controls;
 let canvas = document.getElementById("c");
+let ArcMaterial = [];
+let time = 0;
 
 const group = new THREE.Group();
 
@@ -74,6 +76,25 @@ async function init() {
   group.add(earthParticles[1]);
 
   scene.add(group);
+
+  const city = [
+    {
+      s: { lat: 39.9042, lng: 116.4074 },
+      e: { lat: 3.2028, lng: 73.2207 },
+    },
+    {
+      s: { lat: 30.5728, lng: 104.0668 },
+      e: { lat: 21.3069, lng: 157.8583 },
+    },
+    {
+      s: { lat: 29.6520, lng: 91.1720 },
+      e: { lat: 51.5074, lng: 0.1278 },
+    },
+  ];
+
+  city.forEach((item) => {
+    arcCurve(item.s, item.e);
+  });
 
   group.rotation.y = 85;
 }
@@ -201,6 +222,83 @@ function isLand(u, v, { earthImgData, width, height }) {
   return false; // 否则认为是水域
 }
 
+function arcCurve(s, e) {
+  // 定义北京和马尔代夫的经纬度
+  // const beijing = { lat: 39.9042, lng: 116.4074 };
+  // const maldives = { lat: 3.2028, lng: 73.2207 };
+
+  // 转换为三维坐标
+  const start = createPosition([s.lng, s.lat]);
+  const end = createPosition([e.lng, e.lat]);
+
+  // 计算中间点（抬高的中间点，以模拟弧线）
+  const mid = start.clone().lerp(end, 0.5).normalize().multiplyScalar(130);
+
+  // 创建弧线的控制点
+  const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+
+  // 根据弧线生成几何体
+  const points = curve.getPoints(50); // 生成更多的点可以让弧线更平滑
+  // const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  // ArcMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+
+  const geometry = new THREE.TubeGeometry(
+    curve,
+    Math.round(points.length * 0.5),
+    0.03,
+    8,
+    false
+  );
+
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    uniforms: {
+      time: { value: 0.0 },
+      len: { value: 0.05 },
+      size: { value: 0.01 },
+      bcolor: { value: new THREE.Color("black") },
+      fcolor: { value: new THREE.Color(0xbfe3dd) },
+    },
+    vertexShader,
+    fragmentShader,
+  });
+
+  ArcMaterial.push(material);
+
+  const arc = new THREE.Line(geometry, material);
+
+  // 将弧线添加到场景中
+  group.add(arc);
+}
+
+const vertexShader = `uniform float time;
+uniform float size;
+uniform float len;
+uniform vec3 bcolor;
+uniform vec3 fcolor;
+varying vec3 vColor; 
+varying float vAlpha; 
+void main() {
+  vAlpha = 0.0;
+  vColor = bcolor;
+  vec3 pos = position;
+  float d = uv.x - time;
+
+  if(abs(d) < len) {
+    pos = pos + normal * size;
+    vColor = fcolor;
+    vAlpha = 1.0;
+  }
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+}`;
+
+const fragmentShader = `
+varying vec3 vColor; 
+varying float vAlpha; 
+void main() {
+  gl_FragColor =vec4(vColor, vAlpha);
+}`;
+
 function createPosition(lnglat) {
   const spherical = new THREE.Spherical();
   spherical.radius = 100;
@@ -237,7 +335,18 @@ function render() {
 
   controls.update();
   renderer.render(scene, camera);
+
   group.rotation.y += 0.002;
+
+  if (ArcMaterial?.length > 0) {
+    if (time >= 1.0) {
+      time = 0.0;
+    }
+    time = time + 0.015;
+    ArcMaterial.forEach((item) => {
+      item.uniforms.time.value = time;
+    });
+  }
   requestAnimationFrame(render);
 }
 
