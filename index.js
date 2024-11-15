@@ -1,6 +1,35 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+class CircleLineGeometry extends THREE.BufferGeometry {
+  constructor(radius = 1, segmentCount = 32) {
+    super();
+
+    this.type = "CircleLineGeometry";
+
+    this.parameters = { radius, segmentCount };
+
+    const points = [];
+    for (let i = 0; i <= segmentCount; i++) {
+      const theta = (i / segmentCount - 0.25) * Math.PI * 2;
+      points.push({
+        x: Math.cos(theta) * radius,
+        y: Math.sin(theta) * radius,
+        z: 0,
+      });
+    }
+    this.setFromPoints(points);
+  }
+}
+
+function getRandomColor() {
+  // 确保生成的颜色是明亮的，通常亮色的 R、G、B 值较高
+  const r = Math.floor(Math.random() * 128) + 128; // 红色分量：128-255
+  const g = Math.floor(Math.random() * 128) + 128; // 绿色分量：128-255
+  const b = Math.floor(Math.random() * 128) + 128; // 蓝色分量：128-255
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 let scene;
 let renderer;
 let camera;
@@ -9,7 +38,9 @@ let canvas = document.getElementById("c");
 let ArcMaterial = [];
 let time = 0;
 
+const GLOBE_RADIUS = 100;
 const group = new THREE.Group();
+const circles = [];
 
 init();
 
@@ -38,7 +69,7 @@ async function init() {
   scene.background = new THREE.Color("black");
 
   let directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
-  directionalLight.position.set(100, 100, 100);
+  directionalLight.position.set(GLOBE_RADIUS, GLOBE_RADIUS, GLOBE_RADIUS);
   scene.add(directionalLight);
 
   const helper = new THREE.DirectionalLightHelper(directionalLight, 5);
@@ -54,16 +85,20 @@ async function init() {
 
   window._controls = controls;
 
-  const gridHelper = new THREE.GridHelper(100, 50, 0x808080, 0x808080);
+  const gridHelper = new THREE.GridHelper(GLOBE_RADIUS, 50, 0x808080, 0x808080);
   gridHelper.position.y = 0;
   gridHelper.position.x = 0;
-  // scene.add(gridHelper);
+  scene.add(gridHelper);
 
   const axesHelper = new THREE.AxesHelper(5);
   // scene.add(axesHelper);
 
   // 地球本体
-  const earthGeometry = new THREE.SphereGeometry(100, 100, 100);
+  const earthGeometry = new THREE.SphereGeometry(
+    GLOBE_RADIUS,
+    GLOBE_RADIUS,
+    GLOBE_RADIUS
+  );
   // 材质
   const meshBasic = new THREE.MeshLambertMaterial({ color: "#1c1ca7" });
   const mesh = new THREE.Mesh(earthGeometry, meshBasic);
@@ -87,13 +122,20 @@ async function init() {
       e: { lat: 21.3069, lng: 157.8583 },
     },
     {
-      s: { lat: 29.6520, lng: 91.1720 },
+      s: { lat: 29.652, lng: 91.172 },
       e: { lat: 51.5074, lng: 0.1278 },
+    },
+    {
+      s: { lat: -25.746, lng: 28.1881 },
+      e: { lat: 19.4326, lng: 0.1332 },
     },
   ];
 
   city.forEach((item) => {
     arcCurve(item.s, item.e);
+    const color = getRandomColor();
+    circles.push(Circle(item.s, Math.random() * 2.5 + 0.5, color));
+    circles.push(Circle(item.e, Math.random() * 3 + 0.5, color));
   });
 
   group.rotation.y = 85;
@@ -143,7 +185,7 @@ function createEarthParticles(earthImgData, earthImg) {
   material.blending = THREE.AdditiveBlending;
 
   const spherical = new THREE.Spherical();
-  spherical.radius = 100;
+  spherical.radius = GLOBE_RADIUS;
   const step = 300;
   for (let i = 0; i < step; i++) {
     const vec = new THREE.Vector3();
@@ -223,6 +265,34 @@ function isLand(u, v, { earthImgData, width, height }) {
 }
 
 function arcCurve(s, e) {
+  const vertexShader = `uniform float time;
+    uniform float size;
+    uniform float len;
+    uniform vec3 bcolor;
+    uniform vec3 fcolor;
+    varying vec3 vColor; 
+    varying float vAlpha; 
+    void main() {
+      vAlpha = 0.0;
+      vColor = bcolor;
+      vec3 pos = position;
+      float d = uv.x - time;
+
+      if(abs(d) < len) {
+        pos = pos + normal * size;
+        vColor = fcolor;
+        vAlpha = 1.0;
+      }
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }`;
+
+  const fragmentShader = `
+    varying vec3 vColor; 
+    varying float vAlpha; 
+    void main() {
+      gl_FragColor =vec4(vColor, vAlpha);
+    }`;
+
   // 定义北京和马尔代夫的经纬度
   // const beijing = { lat: 39.9042, lng: 116.4074 };
   // const maldives = { lat: 3.2028, lng: 73.2207 };
@@ -271,33 +341,33 @@ function arcCurve(s, e) {
   group.add(arc);
 }
 
-const vertexShader = `uniform float time;
-uniform float size;
-uniform float len;
-uniform vec3 bcolor;
-uniform vec3 fcolor;
-varying vec3 vColor; 
-varying float vAlpha; 
-void main() {
-  vAlpha = 0.0;
-  vColor = bcolor;
-  vec3 pos = position;
-  float d = uv.x - time;
+function Circle(lnglat, radius, color) {
+  const circleObj = new THREE.Line(
+    new CircleLineGeometry(1, 60),
+    new THREE.LineBasicMaterial({ color })
+  );
+  const circleGroup = new THREE.Group();
 
-  if(abs(d) < len) {
-    pos = pos + normal * size;
-    vColor = fcolor;
-    vAlpha = 1.0;
-  }
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-}`;
+  circleGroup.add(circleObj);
 
-const fragmentShader = `
-varying vec3 vColor; 
-varying float vAlpha; 
-void main() {
-  gl_FragColor =vec4(vColor, vAlpha);
-}`;
+  group.add(circleGroup);
+
+  const position = createPosition([lnglat.lng, lnglat.lat]);
+  circleGroup.position.copy(position);
+
+  const globeCenter = scene.localToWorld(new THREE.Vector3(0, 0, 0));
+  circleGroup.lookAt(globeCenter);
+
+  const curveR = GLOBE_RADIUS * (1 + 0.0015);
+  const maxAngle = (radius * Math.PI) / 180; // in radians
+
+  return (t) => {
+    const ang = t * maxAngle;
+    circleObj.scale.x = curveR * Math.sin(ang);
+    circleObj.scale.y = curveR * Math.sin(ang);
+    circleObj.position.z = curveR * (1 - Math.cos(ang));
+  };
+}
 
 function createPosition(lnglat) {
   const spherical = new THREE.Spherical();
@@ -336,6 +406,15 @@ function render() {
   controls.update();
   renderer.render(scene, camera);
 
+  const duration = 2000;
+  const t = (performance.now() % duration) / duration;
+
+  if (circles.length > 0) {
+    circles.forEach((item) => {
+      item(t);
+    });
+  }
+
   group.rotation.y += 0.002;
 
   if (ArcMaterial?.length > 0) {
@@ -347,6 +426,7 @@ function render() {
       item.uniforms.time.value = time;
     });
   }
+
   requestAnimationFrame(render);
 }
 
