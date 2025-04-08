@@ -118,6 +118,10 @@ async function init() {
       e: { lat: 3.2028, lng: 73.2207 },
     },
     {
+      s: { lat: 39.9042, lng: 116.4074 },
+      e: { lat: 40.68007900420875, lng: -73.98802300054996 },
+    },
+    {
       s: { lat: 30.5728, lng: 104.0668 },
       e: { lat: 21.3069, lng: 157.8583 },
     },
@@ -265,67 +269,102 @@ function isLand(u, v, { earthImgData, width, height }) {
 }
 
 function arcCurve(s, e) {
-  const vertexShader = `uniform float time;
+  const vertexShader = `
+    uniform float time;
     uniform float size;
     uniform float len;
     uniform vec3 bcolor;
     uniform vec3 fcolor;
-    varying vec3 vColor; 
-    varying float vAlpha; 
+    varying vec3 vColor;
+    varying float vAlpha;
+    varying float vIntensity;
+    
     void main() {
-      vAlpha = 0.0;
+      // 初始化变量
+      vAlpha = 0.3;  // 基础可见度，让整条弧线始终有一定可见度
       vColor = bcolor;
-      vec3 pos = position;
-      float d = uv.x - time;
-
-      if(abs(d) < len) {
-        pos = pos + normal * size;
-        vColor = fcolor;
-        vAlpha = 1.0;
-      }
+      vIntensity = 0.0;
+      
+      // 获取当前点在曲线上的位置
+      float curvePos = uv.x;
+      
+      // 计算到动画点的距离
+      float d = curvePos - time;
+      
+      // 循环动画，处理从弧线尾部到头部的过渡
+      if (d < -0.5) d += 1.0;
+      
+      // 计算光效强度，使用平滑过渡而非硬切换
+      float intensity = 1.0 - smoothstep(0.0, len * 1.2, abs(d));
+      
+      // 添加二次波动效果
+      float pulseEffect = 0.4 * (1.0 + sin(curvePos * 30.0 + time * 12.0));
+      
+      // 计算扰动系数，根据曲线位置变化
+      float distortion = size * (intensity + pulseEffect * 0.3);
+      
+      // 应用法线方向扰动
+      vec3 pos = position + normal * distortion;
+      
+      // 保存光效强度给片段着色器
+      vIntensity = intensity;
+      
+      // 根据强度混合颜色
+      vColor = mix(bcolor, fcolor, intensity);
+      
+      // 增强主光效部分的alpha值
+      vAlpha = mix(0.3, 1.0, intensity * (1.0 + pulseEffect * 0.5));
+      
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }`;
 
   const fragmentShader = `
-    varying vec3 vColor; 
-    varying float vAlpha; 
+    varying vec3 vColor;
+    varying float vAlpha;
+    varying float vIntensity;
+    
     void main() {
-      gl_FragColor =vec4(vColor, vAlpha);
+      // 添加一点外发光效果
+      float glow = smoothstep(0.4, 1.0, vIntensity);
+      vec3 finalColor = mix(vColor, vColor * 1.5, glow);
+      
+      gl_FragColor = vec4(finalColor, vAlpha);
     }`;
-
-  // 定义北京和马尔代夫的经纬度
-  // const beijing = { lat: 39.9042, lng: 116.4074 };
-  // const maldives = { lat: 3.2028, lng: 73.2207 };
 
   // 转换为三维坐标
   const start = createPosition([s.lng, s.lat]);
   const end = createPosition([e.lng, e.lat]);
 
+  // 计算直线距离来决定中点的高度
+  const distance = start.distanceTo(end);
+  
+  // 根据距离动态调整中点高度 - 距离越远，弧线越高
+  const heightFactor = Math.min(1.8, Math.max(1.3, distance / 100));
+  
   // 计算中间点（抬高的中间点，以模拟弧线）
-  const mid = start.clone().lerp(end, 0.5).normalize().multiplyScalar(130);
+  const mid = start.clone().lerp(end, 0.5).normalize().multiplyScalar(GLOBE_RADIUS * heightFactor);
 
   // 创建弧线的控制点
   const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
 
   // 根据弧线生成几何体
-  const points = curve.getPoints(50); // 生成更多的点可以让弧线更平滑
-  // const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  // ArcMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
-
+  const points = curve.getPoints(100); // 生成更多的点可以让弧线更平滑
+  
   const geometry = new THREE.TubeGeometry(
     curve,
-    Math.round(points.length * 0.5),
-    0.03,
-    8,
+    Math.round(points.length * 0.6), // 增加分段数提高平滑度
+    0.1,  // 适当的弧线粗细
+    12,    // 增加管道分段，使圆滑度更好
     false
   );
 
   const material = new THREE.ShaderMaterial({
     transparent: true,
+    blending: THREE.AdditiveBlending, // 使用加法混合让颜色更亮
     uniforms: {
       time: { value: 0.0 },
-      len: { value: 0.05 },
-      size: { value: 0.01 },
+      len: { value: 0.15 },  // 流动效果的长度
+      size: { value: 0.03 }, // 弧线凸起大小
       bcolor: { value: new THREE.Color("black") },
       fcolor: { value: new THREE.Color(0xbfe3dd) },
     },
@@ -335,7 +374,8 @@ function arcCurve(s, e) {
 
   ArcMaterial.push(material);
 
-  const arc = new THREE.Line(geometry, material);
+  // 使用Mesh而不是Line，因为我们有TubeGeometry
+  const arc = new THREE.Mesh(geometry, material);
 
   // 将弧线添加到场景中
   group.add(arc);
@@ -406,7 +446,7 @@ function render() {
   controls.update();
   renderer.render(scene, camera);
 
-  const duration = 2000;
+  const duration = 3000; // 增加动画周期
   const t = (performance.now() % duration) / duration;
 
   if (circles.length > 0) {
@@ -415,13 +455,18 @@ function render() {
     });
   }
 
-  group.rotation.y += 0.002;
+  // 增加地球旋转速度
+  group.rotation.y += 0.003;
 
   if (ArcMaterial?.length > 0) {
+    // 使用sin函数让动画速度有所变化，更加自然
+    const sinTime = Math.sin(performance.now() * 0.0005) * 0.5 + 0.5;
+    const speed = 0.008 + sinTime * 0.004;
+    
     if (time >= 1.0) {
       time = 0.0;
     }
-    time = time + 0.015;
+    time = time + speed;
     ArcMaterial.forEach((item) => {
       item.uniforms.time.value = time;
     });
@@ -431,3 +476,4 @@ function render() {
 }
 
 requestAnimationFrame(render);
+
