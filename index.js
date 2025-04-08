@@ -455,8 +455,8 @@ function render() {
     });
   }
 
-  // 增加地球旋转速度
-  group.rotation.y += 0.003;
+  // 减慢地球旋转速度，便于观察弧线效果
+  group.rotation.y += 0.0005;
 
   if (ArcMaterial?.length > 0) {
     // 使用sin函数让动画速度有所变化，更加自然
